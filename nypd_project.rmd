@@ -1,0 +1,176 @@
+---
+title: "NYPD Shooting Incident"
+date: "2023-10-03"
+output: pdf_document
+---
+
+```{r setup, include=FALSE, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Abstract
+
+In the provided R Markdown document, an analysis is presented based on the 'NYPD Shooting Incidents Dataset,' which is sourced from <https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD>. This dataset encompasses comprehensive records of shooting incidents that transpired within New York City, spanning from January 1, 2016, to December 31, 2022. The analysis delves into various aspects of this dataset to uncover insights and patterns within the context of these incidents over the specified timeframe.
+
+## Goals of The Analysis
+For this analysis, I set out with specific objectives in mind. Firstly, I aimed to identify the New York City borough with the highest incidence of accidents. Additionally, I sought to determine the predominant racial profile of the main perpetrators within that particular borough. To achieve these goals, I employed a combination of meticulous data cleaning, informative tables, and visually engaging representations to extract meaningful insights from the dataset.
+
+## Libraries Needed for the Analysis
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(dplyr)
+library(tibble)
+library(forecast)
+library(knitr)
+library(kableExtra)
+library(git2r)
+```
+
+```{r, warning = FALSE, message = FALSE}
+#Read in Data set and Preview the data set
+nypd <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+
+```
+Here, I read in the NYPD CSV file and create a variable name called npyd to access it. 
+
+```{r, warning = FALSE, message = FALSE}
+#Removing unwanted columns in clean_nypd
+clean_nypd <- nypd %>%
+  select(-LOC_OF_OCCUR_DESC, -LOC_CLASSFCTN_DESC, - LOCATION_DESC, - Lon_Lat, -INCIDENT_KEY)
+
+#head(clean_nypd) #Preview of the data with removed unwanted columns
+```
+
+Looking at the data provided, I created another variable named clean_nypd which contained a copy of the original file. I did this so that the orginal file remains untouched. Upon observing the data, I removed columns that I was not interested in analyzing and columns that contained a majority of empty cells.
+
+
+```{r, warning = FALSE, message = FALSE}
+#Changing variable type to appropriate type
+clean_nypd %>%
+  mutate(OCCUR_DATE = as.Date(OCCUR_DATE, format = "%m/%d/%Y"),
+         OCCUR_TIME = as.POSIXct(OCCUR_TIME, format = "%H:%M:%S"),
+         BORO = as.factor(BORO),
+         PRECINCT = as.factor(PRECINCT),
+         JURISDICTION_CODE = as.factor(JURISDICTION_CODE),
+         PERP_AGE_GROUP = as.factor(PERP_AGE_GROUP),
+         PERP_SEX = as.factor(PERP_SEX),
+         PERP_RACE = as.factor(PERP_RACE),
+         VIC_AGE_GROUP = as.factor(VIC_AGE_GROUP),
+         VIC_RACE = as.factor(VIC_RACE))
+```
+
+Here, I changed the variable type of each variable so that the variable type makes more intuitive sense. Doing so also allows me to work with the data more easily. 
+
+
+
+
+
+
+
+
+## Creating Tables and Visual Analysis
+
+```{r, warning = FALSE, message = FALSE}
+#Creating a table that gathers the counts of observation in each BORO and plotted for a visualization
+boro_counts_table <- table(clean_nypd$BORO)
+kable(
+  boro_counts_table,
+  caption = "Counts of Incidents in Boroughs",
+  col.names = c("Boroughs", "Frequency")
+) %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+barplot(boro_counts_table, 
+        main = "Counts of Incidents in Certain Boroughs",
+        xlab = "Borough",
+        ylab = "Count",
+        col = "plum",
+        border = "black",
+        ylim = c(0, max(boro_counts_table) + 15),
+        names.arg = NULL,
+        cex.names = 0.7)
+```
+
+Since a majority of these incidents have taken place within the *Brooklyn Borough*, let's delve deeper and examine the predominant racial demographic among the main perpetrators in Brooklyn
+```{r}
+
+# Filter the clean_nypd data for Brooklyn
+brooklyn_data <- clean_nypd[clean_nypd$BORO == "BROOKLYN", ]
+
+# Create the table for perpetrator race in Brooklyn
+perp_race_group_table <- table(brooklyn_data$PERP_RACE)
+
+# Create a nice looking table with kable function
+kable(
+  perp_race_group_table,
+  caption = "Perpetrator Race Group Table for Brooklyn",
+  col.names = c("Race Group", "Frequency")
+) %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+Here, I created a two tables which display the counts of people in boroughs and the counts of Perpetrator Race for Brooklyn. For a visual aid, I created a plot using the information from the table. From the graphs, we learn that a majority of the crimes happened in Brooklyn and that a majority of perpetrators were Black. 
+
+
+
+
+
+
+## Time Series Model
+```{r, warning = FALSE, message = FALSE}
+#Arrange the time to prepare the data for time series modeling
+clean_nypd_1 <- clean_nypd %>%
+  arrange(OCCUR_TIME)
+
+#Confirm that all the dates follow the same format of hours/minutes/seconds
+clean_nypd_1$OCCUR_TIME <- as.POSIXct(clean_nypd_1$OCCUR_TIME, format = "%H:%M:%S")
+
+#create a new variable and use the ts (time series) function with frequency = 24 for daily observations
+nypd_time_series <- ts(clean_nypd_1$OCCUR_TIME, frequency =24)
+
+#auto.arima fits an auto regressive integrated moving average model
+arima_model_nypd <- auto.arima(nypd_time_series)
+summary(arima_model_nypd)
+```
+Creating a time series model can be helpful when we want to observe temporal patterns that may not be immediately apparent. Creating this type of model can also be used to forecast future events and occurrence which can enhance public safety. Moreover, the judicious allocation of police resources becomes far more efficient, ensuring that funding is appropriately directed toward essential law enforcement activities rather than left to arbitrary budgeting
+
+
+
+
+
+
+## Including Plots
+```{r, warning = FALSE, message = FALSE}
+#Bar Graph of Counts of Statistical Murder Flags across different boroughs
+ggplot(clean_nypd, aes(x = BORO, fill = STATISTICAL_MURDER_FLAG)) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Neighborhood",
+       y = "Counts of Statistical Murder Flags",
+       fill = "Statistical Murder Flag",
+       title = "Counts of Statistical Murder Flags across Areas") +
+  theme_minimal()
+```
+
+```{r, warning = FALSE, message = FALSE}
+ggplot(clean_nypd, aes(x = Latitude, y = Longitude)) +
+  geom_point() +
+  labs(
+    x = "X - Coordinate",
+    y = "Y - COordinate",
+    title = "Scatter Plot of the Latitude and Longitude"
+  ) +
+  theme_minimal()
+
+```
+
+In this step of the analysis, two graphs were made. One bar graph which displayed how many statistical murder flags there were in each borough, and one scatter graph of the XY coordinates of the crime. From the previous analysis, we learned that Brooklyn has the most counts in crime. Brooklyn's coordinates are 40.650002, -73.949997. Observing the Scatter Plot of the Latitude and Longitude, we observe that a majority of the clustering appears around Brooklyn's coordinate.
+
+
+
+
+## Bias Identification and Conclusion
+In conclusion, this analysis of NYPD shooting incident data has provided valuable insights into the patterns and dynamics of such incidents within the boroughs of New York City. However, it is essential to acknowledge the potential sources of bias that may impact the accuracy and generalization of our findings. One possible bias that could be present in our analysis is _location bias_. The data primarily focuses on specific neighborhoods, including the *Bronx*, *Manhattan*, *Brooklyn*, *Queens*, and *Staten Island*. Recognizing the diversity of New York City, it's important to note that police activities can significantly vary by location. It makes sense that a majority of the clustered data points laid wihtin a certain region as the crimes all centered in New York, specifically Brooklyn. Brooklyn, with its status as the most densely populated borough among all, provides a good explanation for its prominence in crime statistics and the prevalence of murder incidents. Such variations may influence the nature of reported incidents, potentially skewing the overall representation of NYPD shooting incidents. Furthermore, underreporting or overreporting in certain neighborhoods can introduce bias into our analysis, as these discrepancies may not accurately reflect the true incidence rates. A majority of the perpetrators were Black and there may be some bias in that since they are generally more biased and targeted against.Additionally, it's worth acknowledging the data's completeness issues. The dataset contained numerous rows and columns with missing values, which posed a challenge to our analysis. To address this, I removed columns that were not relevant for our visualizations or analytical goals. While this helped streamline the analysis, it's important to recognize that data completeness issues can affect the overall validity of our findings.
+
+## Summary
+
+```{r}
+sessionInfo()
+```
+

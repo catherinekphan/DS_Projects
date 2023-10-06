@@ -1,0 +1,221 @@
+---
+title: "Covid 19 Analysis"
+author: "Catherine Phan"
+date: "2023-10-04"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+The COVID-19 pandemic has made an unprecedented global impact, affecting both economies and public health systems worldwide. To gain insights into the virus's spread and to take measures for containment, data has been diligently gathered. My study is centered around identifying counties with the highest COVID-19 case counts and fatalities, within California. The dataset I will be working with is a comprehensive collection of four COVID-19 data extracted from the John Hopkins University GitHub repository. The data sets concern global cases, global deaths, US cases, and US deaths. However, for this analysis, only the US related date sets will be used.
+
+## Goals of the Analysis
+The main goal of this analysis is to identify some counties within California with the highest COVID-19 case counts and fatalities. Following this identification, we will conduct an in-depth examination of those specific counties. By providing these insights, we aim to empower healthcare professionals with valuable information that can be used to optimize resource allocation effectively. I chose California as the main concentration in this study because of my strong connection to the State as I was born and raised here.
+
+
+## Libraries Needed for the Analysis
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(tibble)
+library(forecast)
+library(knitr)
+library(git2r)
+library(gt)
+```
+
+## Cleaning the Data
+```{r,warning = FALSE, message = FALSE}
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+file_names <- c("time_series_covid19_confirmed_US.csv", "time_series_covid19_deaths_US.csv", "time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_global.csv") 
+urls <- str_c(url_in, file_names)
+US_cases <- read_csv(urls[1])
+US_deaths <- read_csv(urls[2])
+
+
+#transform the data from wide format to long format and remove columns not needed for the analysis.
+US_cases <- US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+US_deaths <- US_deaths %>%
+  pivot_longer(cols = -(UID:Population),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+#joined the US_deaths data set with US_cases using the full_join function
+us <- US_cases %>%
+  full_join(US_deaths)
+
+#final step of cleaning, only look at cases greater than zero in the US
+us <- us %>% filter(cases > 0)
+
+```
+With the model our professor shared, I've gather the two US COVID-19 data sets from the John Hopkins GitHub. These data sets have been merged into the variable _us_ containing data on COVID-19 cases and deaths in the United States.
+
+## Preparing the Data to Create Visuals
+```{r,warning = FALSE, message = FALSE}
+#into a new variable US_state, create a new column that calculates deaths per million
+US_state <- us %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths), Population = sum(Population)) %>%
+  mutate(deaths_per_mil = deaths * 1000000 / Population) %>%
+  select(Province_State, Country_Region, date, cases, deaths, deaths_per_mil, Population) %>%
+  ungroup()
+```
+
+
+```{r,warning = FALSE, message = FALSE}
+#Looking deeper into California filtering for cases greater than zero
+state <- "California"
+
+US_state %>%
+  filter(Province_State == state, cases > 0) %>%
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = cases, color = "Cases"), size = 1.2) +
+  geom_point(aes(y = cases, color = "Cases"), size = 2.5, alpha =.7) +
+  geom_line(aes(y = deaths, color = "Deaths"), size = 1.2) +
+  geom_point(aes(y = deaths, color = "Deaths"), size = 2.5, alpha = .7, shape = 19) +
+  scale_y_log10() +
+  labs(title = paste("Covid-19 in", state),
+       subtitle = "Cumulative Cases and Deaths Over Time",
+       y = "Count (log scale)",
+       color = "Legend",
+       caption = "Source: John Hopkins Covid-19 GitHub Repository")+
+    theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 20, face = "bold"),
+    plot.subtitle = element_text(size = 14),
+    plot.caption = element_text(hjust = 0.5)
+  )
+```
+By analyzing the trajectory of Covid-19 in California, we uncover several encouraging trends. Over time, we notice a consistent pattern: the number of cases significantly outweighs the number of fatalities, a promising sign. Additionally, around the onset of 2022, there's a noticeable trend of both cases and deaths stabilizing. This could suggest that the spread of Covid-19 has been better managed, thanks to advances in technology and healthcare infrastructure. Healthcare facilities have likely gained a better understanding of how to treat Covid-19 patients effectively and implement measures to control its transmission. However, looking at California as a whole can be daunting. In the code chunks below, my goal is to narrow down to the top _7_ counties in California that has the highest amount of deaths.
+
+```{r, warning = FALSE, message = FALSE}
+#All counties in California
+all_cali <- us %>%
+   filter(Province_State == "California", Admin2 != "Unassigned") %>%
+  group_by(Admin2) %>%
+  summarize(
+    Population = sum(Population),
+    deaths = sum(deaths),
+    cases = sum(cases)) %>%
+  mutate(deaths_per_thousands = deaths * 1000 / Population,
+         cases_per_thousands = cases * 1000 / Population) %>%
+  select(Admin2, Population, cases, deaths, deaths_per_thousands, cases_per_thousands)
+
+#Renaming Admin2 to a more intuitive variable name, such as County
+all_cali <- all_cali %>%
+  rename("County" = Admin2)
+
+#A scatter plot of population and number of covid-19 cases in California Counties
+# Create a ggplot scatter plot with improved aesthetics
+ggplot(all_cali, aes(x = Population, y = cases)) +
+  geom_point(color = "blue", size = 3, alpha = 0.7) +  # Adjust alpha for transparency
+  labs(
+    title = "Population vs. COVID-19 Cases in California Counties",
+    x = "Population",
+    y = "COVID-19 Cases"
+  ) +
+  scale_x_continuous(labels = scales::comma) + 
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),  # Adjust title size and style
+    axis.title.x = element_text(size = 12, face = "bold"),  # Adjust x-axis label size and style
+    axis.title.y = element_text(size = 12, face = "bold"),  # Adjust y-axis label size and style
+    axis.text = element_text(size = 10),  # Adjust axis tick label size
+    legend.position = "none"  # Remove legend
+  ) +
+  geom_smooth(method = "lm", color = "plum", se = FALSE) 
+
+#Table of all the Covid Cases and Deaths across Counties of California
+all_cali %>%
+  gt() %>%
+  fmt_number(
+    columns = c(Population, cases, deaths),
+    decimals = 0
+  )
+  
+#Looking at the top seven counties with the highest deaths per thousand statistic
+cali <- us %>%
+  filter(Province_State == "California", Admin2 != "Unassigned") %>%
+  group_by(Admin2) %>%
+  summarize(
+    Population = sum(Population),
+    deaths = sum(deaths),
+    cases = sum(cases)) %>%
+  mutate(deaths_per_thousands = deaths * 1000 / Population,
+         cases_per_thousands = cases * 1000 / Population) %>%
+  select(Admin2, Population, cases, deaths, deaths_per_thousands, cases_per_thousands) %>%
+  slice_max(deaths_per_thousands, n = 7)
+
+cali <- cali %>%
+  rename("County" = Admin2)
+
+#Creating a visual using ggplot of the deaths and cases per thousands count for these seven counties
+cali_long <- cali %>%
+  gather(metric, per_thousand, deaths_per_thousands, cases_per_thousands)
+
+ggplot(cali_long, aes(x = reorder(County, -per_thousand), y = per_thousand, fill = metric)) +
+  geom_bar(stat = "identity", position = position_dodge(), width = 0.6) +
+  labs(
+    title = "Top Counties in California by Deaths and Cases per Thousand",
+    x = "County",
+    y = "Per Thousand"
+  ) +
+  scale_fill_manual(values = c("deaths_per_thousands" = "royalblue1", "cases_per_thousands" = "hotpink")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_flip()
+
+#Create a table showing the top seven counties in California with the highest deaths per thousand
+cali %>%
+  gt() %>%
+  fmt_number(
+    columns = c(Population, cases, deaths),
+    decimals = 0
+  )
+
+```
+When looking at California as a whole, we observe that as population in an area increases, there tend to be more covid-19 cases which makes intuitive sense. When we narrow down our counties, we learn that Imperial, Tulare, San Bernardino, Los Angeles, Merced, Stanislaus, and Inyo counties in California have consistently exhibited the highest incidence rates, both in terms of Covid-19 cases and related deaths, per one thousand residents. This critical insight underscores the significance of targeted interventions and resource allocation in these specific areas.
+
+
+
+
+
+## Model
+```{r, warning = FALSE, message = FALSE}
+model_1 <- lm(deaths ~ Population + cases + Population*cases, data = all_cali)
+summary(model_1)
+```
+In this analysis, a linear regression model was constructed to forecast the number of deaths in California counties by considering both their population and the incidence of COVID-19 cases. The presence of a small p-value associated with the predictor variables indicates their statistical significance in predicting the death toll within these counties. This outcome aligns with our expectations, as counties experiencing a higher number of COVID-19 cases tend to witness a correspondingly greater number of deaths. Furthermore, the statistical significance of the interaction term between 'Population' and 'Cases' underscores the complexity of the relationship between these variables.
+
+
+## Bias Identification and Conclusion
+In this analysis, my primary objective was to identify the counties in California most profoundly impacted by Covid-19, focusing on both death and case counts. Despite my personal connection and biased towards San Francisco, a prominent Californian county, I made an effort to remain impartial and avoid and bias that could lead me to exclusively concentrate on my home city. 
+
+My analysis instead has a broader perspective, encompassing the entirety of California. I discovered that, in general, the number of reported cases consistently surpassed the number of deaths. Additionally, I learned that approximately two years after the onset of the pandemic, there was a notable trend towards the stabilization of both case and death rates. While there may be various reasons for this trend, one plausible explanation could be the result of improved healthcare infrastructure and vaccination efforts, resulting in reduced transmissions over time.
+
+In addition to looking at California as a whole, I narrowed my focus to the seven counties that exhibited the highest rates of Covid-19 related death and case counts. These seven counties ended up being Imperial, Tulane, San Bernardino, Los Angeles, Merced, Stanislaud, and Inyo. I believe that by concentrating efforts into these particular areas, healthcare providers can better address the challenges posed by Covid-19 and provide a more timely and effective care to those who reside in those communities.
+
+## Appendix
+```{r, warning = FALSE, message = FALSE}
+sessionInfo()
+
+```
